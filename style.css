@@ -1,0 +1,73 @@
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: #f5f6f8; color: #111;
+}
+body { display: flex; flex-direction: column; }
+
+button { cursor: pointer; }
+
+#top-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 8px; padding: 8px 12px; background: #fff; border-bottom: 1px solid #ddd;
+}
+#top-bar .group { display: flex; align-items: center; gap: 10px; }
+#record-btn.recording { background: #e53935; color: #fff; border-color: #c62828; }
+
+.panel { padding: 8px 12px; }
+
+#tet12-panel .tet12-grid { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+#tet12-panel .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.note-btn { padding: 10px 16px; border: 1px solid #ccc; border-radius: 999px; background: #fff; }
+.note-btn.active { background: #2f8a9a; color: #fff; border-color: #1d6673; }
+
+#grid-panel { display: flex; gap: 10px; align-items: stretch; }
+#cent-labels { width: 64px; display: flex; flex-direction: column; justify-content: space-between; font-size: 12px; }
+#grid-wrapper { position: relative; flex: 1; display: flex; flex-direction: column; }
+#pitch-grid { flex: 1; display: flex; background: #256f7c; border-radius: 8px; overflow: hidden; touch-action: none; }
+.note-column { flex: 1; border-right: 1px solid rgba(255,255,255,0.3); }
+.note-column:last-child { border-right: none; }
+.note-column.active { background: #2f8a9a; }
+#note-label-row { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; margin-top: 6px; }
+.note-name { text-align: center; font-weight: 600; }
+
+#touch-hud {
+  position: absolute; top: 8px; left: 8px; padding: 6px 10px;
+  background: rgba(0,0,0,0.55); color: #fff; border-radius: 6px;
+  font-weight: 600; pointer-events: none; transform: translate(-9999px,-9999px);
+}
+
+/* ----- コードモード（縦スライダー） ----- */
+#code-columns { display: grid; grid-template-columns: repeat(12, 1fr); gap: 18px; padding: 8px 4px 0; }
+.code-col { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.code-rail {
+  width: 14px; height: 280px; background: #e0e0e0; border-radius: 999px; position: relative;
+}
+.code-thumb {
+  position: absolute; left: 50%; transform: translate(-50%, -50%);
+  width: 64px; padding: 6px 10px; text-align: center; font-weight: 700;
+  border-radius: 18px; background: #a7d7ff; border: 1px solid #7fbce6;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.05);
+  user-select: none; touch-action: none;
+}
+.code-thumb.alt { background: #ffd17c; border-color: #f4b84a; }
+.code-name { font-weight: 700; }
+.code-cent { font-size: 12px; color: #555; height: 16px; }
+
+#code-cent-row {
+  display: grid; grid-template-columns: repeat(12, 1fr);
+  gap: 18px; padding: 6px 4px 4px; font-size: 12px; color: #444; text-align: center;
+}
+
+/* 録音 */
+.recordings { background: #fff; border-top: 1px solid #ddd; padding: 8px 12px 16px; }
+#recordings-list .item { display: flex; align-items: center; gap: 12px; padding: 6px 0; }
+#recordings-list audio { width: 300px; }
+.mini { font-size: 12px; padding: 4px 8px; }
+
+/* スマホ対応 */
+@media (max-width: 680px) {
+  #code-columns { gap: 12px; }
+  .code-thumb { width: 56px; }
+  #grid-panel { flex-direction: row; }
+}

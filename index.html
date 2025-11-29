@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pitch Touch – Grid / 12TET / Code</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- ツールバー -->
+  <header id="top-bar">
+    <div class="group">
+      <label><input type="radio" name="mainMode" value="grid" checked /> 通常</label>
+      <label><input type="radio" name="mainMode" value="tet12" /> 12TET</label>
+      <label><input type="radio" name="mainMode" value="code" /> コード</label>
+    </div>
+    <div class="group" id="scale-group">
+      <label><input type="radio" name="scaleMode" value="12" checked /> 12音</label>
+      <label><input type="radio" name="scaleMode" value="7" /> 7音</label>
+      <button id="oct-down">−</button>
+      <span id="oct-label">0</span>
+      <button id="oct-up">＋</button>
+      <select id="sound-select">
+        <option value="sine">Sine</option>
+        <option value="triangle">Triangle</option>
+        <option value="square">Square</option>
+        <option value="sawtooth">Saw</option>
+      </select>
+    </div>
+    <div class="group">
+      <button id="record-btn">● 録音</button>
+      <span id="record-status">待機中</span>
+    </div>
+  </header>
+
+  <!-- 12TET：中央12ボタンのみ -->
+  <section id="tet12-panel" class="panel" hidden>
+    <div class="tet12-grid">
+      <div class="row">
+        <button class="note-btn" data-step="0">C</button>
+        <button class="note-btn" data-step="1">C#</button>
+        <button class="note-btn" data-step="2">D</button>
+        <button class="note-btn" data-step="3">D#</button>
+        <button class="note-btn" data-step="4">E</button>
+        <button class="note-btn" data-step="5">F</button>
+      </div>
+      <div class="row">
+        <button class="note-btn" data-step="6">F#</button>
+        <button class="note-btn" data-step="7">G</button>
+        <button class="note-btn" data-step="8">G#</button>
+        <button class="note-btn" data-step="9">A</button>
+        <button class="note-btn" data-step="10">A#</button>
+        <button class="note-btn" data-step="11">B</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 通常：音階グリッド（縦：cent、横：音名） -->
+  <main id="grid-panel" class="panel">
+    <div id="cent-labels">
+      <div>+100 ct</div>
+      <div>0 ct</div>
+      <div>-100 ct</div>
+    </div>
+    <div id="grid-wrapper">
+      <div id="pitch-grid"></div>
+      <div id="note-label-row"></div>
+      <div id="touch-hud" hidden>—</div>
+    </div>
+  </main>
+
+  <!-- コード：12本縦スライダー＋各列のcent表示（押すと有効化/無効化） -->
+  <section id="code-panel" class="panel" hidden>
+    <div id="code-columns"></div>
+    <div id="code-cent-row"></div>
+  </section>
+
+  <!-- 録音結果 -->
+  <section id="recordings" class="recordings">
+    <h3>録音ファイル
+      <button id="clear-recs" class="mini">一覧をクリア</button>
+    </h3>
+    <div id="recordings-list"></div>
+  </section>
+
+  <script src="script.js"></script>
+</body>
+</html>
