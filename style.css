@@ -2,6 +2,16 @@
    全体レイアウト（ライトテーマ）
    ========================= */
 html, body {
+  overscroll-behavior: none;
+}
+
+/* グリッド上は「タッチ＝操作」に専念させる（スクロール・ズーム無効） */
+#pitch-grid,
+.note-column {
+  touch-action: none;
+}
+
+html, body {
   margin: 0;
   padding: 0;
   height: 100%;

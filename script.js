@@ -315,6 +315,8 @@ function gridChordTap(e){
 }
 
 /* ====== 単音 / コード ====== */
+
+// ★ タッチ向けにアタック速め＆リリース長め
 async function startNote(info){
   try{
     await ensureAudio();
@@ -323,17 +325,47 @@ async function startNote(info){
     showErr(`Audio開始失敗: ${e?.message||e}`);
     return;
   }
-  stopNote();
+  stopNote(); // 既存ノートをいったん止める
+
+  const t = audioCtx.currentTime;
+
   osc = audioCtx.createOscillator();
   gainNode = audioCtx.createGain();
+
   osc.type = soundSelectEl.value;
   osc.frequency.value = calcFreq(info.step, info.cents, octaveOffset);
-  gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-  gainNode.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.02);
+
+  // アタック：すぐに鳴り始めるように 5ms で立ち上げ
+  gainNode.gain.cancelScheduledValues(t);
+  gainNode.gain.setValueAtTime(0, t);
+  gainNode.gain.linearRampToValueAtTime(0.55, t + 0.005);
+
   osc.connect(gainNode).connect(masterGain);
-  osc.start();
+  osc.start(t);
+
   currentNoteInfo = info;
 }
+
+function stopNote(){
+  if(!osc) return;
+
+  const t = audioCtx.currentTime;
+
+  // 今の値から少し余韻を残して 0 にフェードアウト（約 0.15 秒）
+  gainNode.gain.cancelScheduledValues(t);
+  const current = gainNode.gain.value;
+  gainNode.gain.setValueAtTime(current, t);
+  gainNode.gain.linearRampToValueAtTime(0, t + 0.15);
+
+  osc.stop(t + 0.16);
+
+  osc = null;
+  gainNode = null;
+  currentNoteInfo = null;
+
+  document.querySelectorAll('.note-column').forEach(c=>c.classList.remove('active'));
+}
+
 function updateNote(info){
   if(!osc) return;
   const f = calcFreq(info.step, info.cents, octaveOffset);
@@ -341,15 +373,7 @@ function updateNote(info){
   osc.frequency.linearRampToValueAtTime(f, audioCtx.currentTime + 0.02);
   currentNoteInfo = info;
 }
-function stopNote(){
-  if(!osc) return;
-  gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.06);
-  osc.stop(audioCtx.currentTime + 0.07);
-  osc=null;
-  gainNode=null;
-  currentNoteInfo=null;
-  document.querySelectorAll('.note-column').forEach(c=>c.classList.remove('active'));
-}
+
 
 // コード用
 function startChordVoice(step, cents){
