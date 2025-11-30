@@ -617,14 +617,28 @@ function attachEvents(){
     }
   });
 
-  // ★ ロングタップなどで pointer capture が外れたときも必ず音を止める
+  // pointer capture が外れたときも必ず音を止める
   gridEl.addEventListener('lostpointercapture', e=>{
     stopNote(e.pointerId);
     hudHide();
   });
 
-  // ★ 長押しでコンテキストメニューが出ると pointerup が来ないので禁止
+  // 長押しでコンテキストメニューが出ると pointerup が来ないので禁止
   gridEl.addEventListener('contextmenu', e=>e.preventDefault());
+
+  // ★ グリッドの外で pointerup / cancel されても必ず音を止める
+  window.addEventListener('pointerup', e=>{
+    if (activePointers.has(e.pointerId)){
+      stopNote(e.pointerId);
+      hudHide();
+    }
+  });
+  window.addEventListener('pointercancel', e=>{
+    if (activePointers.has(e.pointerId)){
+      stopNote(e.pointerId);
+      hudHide();
+    }
+  });
 
   fsBtn.addEventListener('click', toggleFullscreen);
   document.addEventListener('fullscreenchange', updateFSUI);
