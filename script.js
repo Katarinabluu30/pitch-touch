@@ -1,17 +1,18 @@
-// ★ HTTPS/localhost で開いてね（file:// 直開きは不安定）
-// if (location.protocol === "file:") {
-//   alert("file:// で開くと AudioWorklet が使えません。GitHub Pages 等 https(s) で開いてください。");
-// }
-const errEl = document.getElementById('err');
-function showErr(msg){ errEl.textContent = `⚠ ${msg}`; console.error(msg); }
+// Microtonal Touch Grid
 
-/* ========= スケール定義 ========= */
+const errEl = document.getElementById('err');
+function showErr(msg){
+  if (errEl) errEl.textContent = `⚠ ${msg}`;
+  console.error(msg);
+}
+
+/* ====== 音階定義 ====== */
 const NOTE_NAMES_7  = ["C","D","E","F","G","A","B"];
 const NOTE_STEPS_7  = [0,2,4,5,7,9,11];
 const NOTE_NAMES_12 = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 const NOTE_STEPS_12 = [0,1,2,3,4,5,6,7,8,9,10,11];
 
-/* ========= DOM ========= */
+/* ====== DOM ====== */
 const mainModeEls   = document.querySelectorAll('input[name="mainMode"]');
 const scaleModeEls  = document.querySelectorAll('input[name="scaleMode"]');
 const soundSelectEl = document.getElementById("sound-select");
@@ -23,25 +24,17 @@ const recordStatus  = document.getElementById("record-status");
 const clearRecsBtn  = document.getElementById("clear-recs");
 const fsBtn         = document.getElementById("fs-btn");
 
-const gridPanel     = document.getElementById("grid-panel");
-const tet12Panel    = document.getElementById("tet12-panel");
-const codePanel     = document.getElementById("code-panel");
-const recordingsSec = document.getElementById("recordings");
-
 const gridEl        = document.getElementById("pitch-grid");
 const noteRowEl     = document.getElementById("note-label-row");
 const centLabelsEl  = document.getElementById("cent-labels");
+const recordingsSec = document.getElementById("recordings");
 const hudEl         = document.getElementById("touch-hud");
 
-// （コード用のスライダー系は使わないが一応残しておく）
-const codeColsEl    = document.getElementById("code-columns");
-const codeCentRowEl = document.getElementById("code-cent-row");
-
-/* ========= Audio ========= */
+/* ====== Audio 関係 ====== */
 let audioCtx=null, masterGain=null, comp=null;
 let useWorklet=false, recorderNode=null, scriptNode=null;
 let osc=null, gainNode=null, currentNoteInfo=null;
-let chordVoices = new Map(); // step -> {osc,gain,cents,step,thumbEl}
+let chordVoices = new Map(); // step -> {osc,gain,cents}
 let octaveOffset = 0;
 let isPointerDown=false;
 
@@ -49,7 +42,7 @@ let isRecording=false, recLeft=null, recRight=null, recSR=48000, recCount=0;
 
 const CENT_MIN=-100, CENT_MAX=100;
 
-/* ========= Worklet（内蔵 → Blob URL） ========= */
+/* ====== Worklet ソース作成 ====== */
 function createRecorderWorkletURL() {
   const code = `
     class RecorderProcessor extends AudioWorkletProcessor {
@@ -98,43 +91,69 @@ function createRecorderWorkletURL() {
   return URL.createObjectURL(blob);
 }
 
-/* ========= 初期化 ========= */
+/* ====== 初期化 ====== */
 init();
 function init(){
+  if (!gridEl || !noteRowEl){
+    showErr("pitch-grid か note-label-row が見つかりません。HTMLのIDを確認してください。");
+    return;
+  }
   buildGrid();
-  buildCodeColumns();   // 使わないけどエラー防止で一度作っておく
   attachEvents();
   updatePanels();
   updateOct();
   updateRecUI();
-  resizePanels();
 
-  // モバイル初回タッチでContext解錠
+  // モバイル：最初のタッチで AudioContext 解錠
   window.addEventListener('touchstart', async function unlockOnce(){
     try{ await ensureAudio(); await audioCtx.resume(); }catch(e){ showErr(`Audio unlock失敗: ${e?.message||e}`); }
     window.removeEventListener('touchstart', unlockOnce, {passive:true});
   }, {passive:true});
-
-  window.addEventListener('resize', resizePanels);
 }
 
-/* ========= “画面いっぱい”に追従 ========= */
-function resizePanels(){
-  const topH = document.getElementById('top-bar').offsetHeight || 56;
-  const footH = document.getElementById('build-info').offsetHeight || 28;
-  const recH = recordingsSec.hasAttribute('hidden') ? 0 : recordingsSec.offsetHeight;
-  const avail = window.innerHeight - topH - footH - recH;
-  document.querySelectorAll('.code-rail').forEach(el=>{
-    el.style.height = Math.round(avail * 0.85) + 'px';
+/* ====== モード / スケール ====== */
+function getMainMode(){
+  const r = Array.from(mainModeEls).find(x=>x.checked);
+  return r ? r.value : 'grid';
+}
+function getScaleDefs(){
+  const r = Array.from(scaleModeEls).find(x=>x.checked);
+  const mode = r ? r.value : '12';
+  return mode === '7'
+    ? { names: NOTE_NAMES_7,  steps: NOTE_STEPS_7  }
+    : { names: NOTE_NAMES_12, steps: NOTE_STEPS_12 };
+}
+function updatePanels(){
+  const mode = getMainMode();
+  // 12平均律モードではセン値ラベルを隠す
+  centLabelsEl.hidden = (mode === 'tet12');
+  stopNote();
+  stopAllChord();
+  hudHide();
+}
+
+/* ====== グリッド生成 ====== */
+function buildGrid(){
+  const {names} = getScaleDefs();
+  gridEl.innerHTML = '';
+  noteRowEl.innerHTML = '';
+  names.forEach(name=>{
+    const col = document.createElement('div');
+    col.className = 'note-column';
+    gridEl.appendChild(col);
+    const label = document.createElement('div');
+    label.className = 'note-name';
+    label.textContent = name;
+    noteRowEl.appendChild(label);
   });
 }
 
-/* ========= Audio Graph ========= */
+/* ====== Audio Graph 構築 ====== */
 async function ensureAudio(){
   if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
   if(!masterGain){
     masterGain = audioCtx.createGain();
-    masterGain.gain.value = 0.6;  // 少し下げる
+    masterGain.gain.value = 0.6;
 
     comp = audioCtx.createDynamicsCompressor();
     comp.threshold.value = -12;
@@ -147,23 +166,27 @@ async function ensureAudio(){
 
     try{
       if(audioCtx.audioWorklet){
-        const workletURL = createRecorderWorkletURL();
-        await audioCtx.audioWorklet.addModule(workletURL);
+        const url = createRecorderWorkletURL();
+        await audioCtx.audioWorklet.addModule(url);
+        URL.revokeObjectURL(url);
+
         recorderNode = new AudioWorkletNode(audioCtx, 'recorder-processor',
           { numberOfInputs:1, numberOfOutputs:1, outputChannelCount:[2] });
-        URL.revokeObjectURL(workletURL);
 
         masterGain.connect(comp);
         comp.connect(recorderNode);
         recorderNode.connect(audioCtx.destination);
-        useWorklet = true;
+
         recorderNode.port.onmessage = (e)=>{
           if(e.data?.type === 'dump'){
             const wav = encodeWav([e.data.left, e.data.right], recSR);
             pushRecording(wav);
           }
         };
-      } else { throw new Error('no worklet'); }
+        useWorklet = true;
+      } else {
+        throw new Error("AudioWorklet 未対応");
+      }
     }catch(err){
       showErr(`Worklet未使用で録音にフォールバック: ${err?.message||err}`);
       scriptNode = audioCtx.createScriptProcessor(1024, 2, 2);
@@ -191,91 +214,8 @@ function appendF32(dst, src){
   return out;
 }
 
-/* ========= モード切替（排他表示） ========= */
-
-// ラジオボタン value のゆらぎを吸収
-const MAIN_MODE_ALIASES = {
-  'grid': 'grid',
-  'normal': 'grid',
-  '通常': 'grid',
-  'tet12': 'tet12',
-  '12TET': 'tet12',
-  '12tet': 'tet12',
-  '12': 'tet12',
-  'code': 'code',
-  'コード': 'code'
-};
-const SCALE_MODE_ALIASES = {
-  '12': '12',
-  '１２': '12',
-  '12音': '12',
-  '7':  '7',
-  '７':  '7',
-  '7音': '7'
-};
-
-function getMainMode(){
-  const raw = Array.from(mainModeEls).find(r=>r.checked)?.value || 'grid';
-  const key = String(raw).trim();
-  return MAIN_MODE_ALIASES[key] || 'grid';
-}
-function getScaleDefs(){
-  const raw = Array.from(scaleModeEls).find(r=>r.checked)?.value || '12';
-  const key = String(raw).trim();
-  const m = SCALE_MODE_ALIASES[key] || '12';
-  return (m === '7')
-    ? { names: NOTE_NAMES_7,  steps: NOTE_STEPS_7  }
-    : { names: NOTE_NAMES_12, steps: NOTE_STEPS_12 };
-}
-
-// ★ 今はすべてグリッドで操作するので gridPanel は常に表示
-function updatePanels(){
-  const mode = getMainMode();
-
-  if (gridPanel){
-    gridPanel.hidden = false;
-    gridPanel.style.display = 'block';
-  }
-  if (tet12Panel){
-    tet12Panel.hidden = true;
-    tet12Panel.style.display = 'none';
-  }
-  if (codePanel){
-    codePanel.hidden = true;
-    codePanel.style.display = 'none';
-  }
-
-  // 12TETモードだけ縦軸ラベルを消す（見た目の好みで調整可）
-  centLabelsEl.hidden = (mode === 'tet12');
-
-  stopNote();
-  stopAllCode();
-  hudHide();
-
-  if (!document.getElementById('recordings-list').children.length){
-    recordingsSec.hidden = true;
-  }
-
-  resizePanels();
-}
-
-/* ========= グリッド描画 ========= */
-function buildGrid(){
-  const {names} = getScaleDefs();
-  gridEl.innerHTML='';
-  noteRowEl.innerHTML='';
-  names.forEach(n=>{
-    const col = document.createElement('div');
-    col.className='note-column';
-    gridEl.appendChild(col);
-    const lab = document.createElement('div');
-    lab.className='note-name';
-    lab.textContent=n;
-    noteRowEl.appendChild(lab);
-  });
-}
-
-/* ========= グリッド操作：通常モード（ドラッグでピッチベンド） ========= */
+/* ====== グリッド操作 ====== */
+// 通常：押している間だけ発音 & 上下で ±100 ct
 function gridPointerNormal(e, phase){
   const rect = gridEl.getBoundingClientRect();
   const x = e.clientX - rect.left;
@@ -285,14 +225,12 @@ function gridPointerNormal(e, phase){
     hudHide();
     return;
   }
-
   const {names, steps} = getScaleDefs();
   const colW = rect.width / names.length;
   const idx = Math.max(0, Math.min(names.length-1, Math.floor(x/colW)));
   const name = names[idx];
   const step = steps[idx];
 
-  // 上=+100ct, 下=-100ct
   const ratioY = y/rect.height;
   const cents = Math.round(CENT_MAX - (CENT_MAX - CENT_MIN)*ratioY);
 
@@ -306,7 +244,7 @@ function gridPointerNormal(e, phase){
   else if(phase==='end'){  stopNote(); hudHide(); }
 }
 
-/* ========= グリッド操作：12TETモード（ピッチベンド無し） ========= */
+// 12平均律：0 ct 固定
 function gridPointerTet12(e, phase){
   const rect = gridEl.getBoundingClientRect();
   const x = e.clientX - rect.left;
@@ -316,7 +254,6 @@ function gridPointerTet12(e, phase){
     hudHide();
     return;
   }
-
   const {names, steps} = getScaleDefs();
   const colW = rect.width / names.length;
   const idx = Math.max(0, Math.min(names.length-1, Math.floor(x/colW)));
@@ -327,14 +264,14 @@ function gridPointerTet12(e, phase){
     .forEach((c,i)=>c.classList.toggle('active', i===idx && isPointerDown));
   hudShow(`${name}`, x, y);
 
-  const info = {name, step, cents:0}; // 常に 0 ct
+  const info = {name, step, cents:0};
   if(phase==='start')      startNote(info);
   else if(phase==='move')  updateNote(info);
   else if(phase==='end'){  stopNote(); hudHide(); }
 }
 
-/* ========= グリッド操作：コードモード（トグルON/OFFで和音保持） ========= */
-function gridCodeTap(e){
+// コードモード：タップで ON/OFF（縦位置がその列の cent）
+function gridChordTap(e){
   const rect = gridEl.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
@@ -342,158 +279,31 @@ function gridCodeTap(e){
     hudHide();
     return;
   }
-
   const {names, steps} = getScaleDefs();
   const colW = rect.width / names.length;
   const idx = Math.max(0, Math.min(names.length-1, Math.floor(x/colW)));
   const name = names[idx];
   const step = steps[idx];
 
-  // 上=+100ct, 下=-100ct
   const ratioY = y/rect.height;
   const cents = Math.round(CENT_MAX - (CENT_MAX - CENT_MIN)*ratioY);
 
   const cols = document.querySelectorAll('.note-column');
 
   if (chordVoices.has(step)){
-    // 既に鳴っている → OFF
     const v = chordVoices.get(step);
     v.gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.06);
     v.osc.stop(audioCtx.currentTime + 0.07);
     chordVoices.delete(step);
-    cols[idx].classList.remove('active'); // ハイライト解除
+    cols[idx].classList.remove('active');
   } else {
-    // まだ鳴っていない → この高さでON
-    startCodeVoice(step, cents, null);
-    cols[idx].classList.add('active');    // ハイライトON
+    startChordVoice(step, cents);
+    cols[idx].classList.add('active');
   }
-
   hudShow(`${name}  ${cents>=0?'+':''}${cents} ct`, x, y);
 }
 
-/* ========= コード（スライダー用の関数は一部再利用） ========= */
-function buildCodeColumns(){
-  // ここは今は画面に出ていないが、一応DOMを作っておく
-  if (!codeColsEl || !codeCentRowEl) return;
-  codeColsEl.innerHTML='';
-  codeCentRowEl.innerHTML='';
-  NOTE_NAMES_12.forEach((name, step)=>{
-    const col = document.createElement('div');
-    col.className='code-col';
-    col.dataset.step=step;
-
-    const rail = document.createElement('div');
-    rail.className='code-rail';
-    const thumb = document.createElement('div');
-    thumb.className='code-thumb';
-    thumb.textContent='+0 ct';
-    placeThumb(rail, thumb, 0);
-
-    // 以下、旧スライダー用イベント。今は画面に出ていないので実質無効
-    thumb.addEventListener('pointerdown', async ev=>{
-      ev.preventDefault();
-      await ensureAudio();
-      await audioCtx.resume();
-      if(chordVoices.has(step)) stopCodeVoice(step, thumb);
-      else startCodeVoice(step, 0, thumb);
-    });
-
-    const moveOnRail = (ev)=>{
-      const r = rail.getBoundingClientRect();
-      const y = Math.max(0, Math.min(r.height, ev.clientY - r.top));
-      const ratio = 1 - (y / r.height);
-      const cents = Math.round(CENT_MIN + (CENT_MAX - CENT_MIN)*(ratio*0.5 + 0.5));
-      placeThumb(rail, thumb, cents);
-      thumb.textContent = `${cents >= 0 ? '+' : ''}${cents} ct`;
-      if(codeCentRowEl.children[step]){
-        codeCentRowEl.children[step].textContent = `${NOTE_NAMES_12[step]}: ${cents} ct`;
-      }
-      if(chordVoices.has(step)) retuneCodeVoice(step, cents);
-      thumb.classList.toggle('on', chordVoices.has(step));
-    };
-    rail.addEventListener('pointerdown', ev=>{
-      ev.preventDefault();
-      rail.setPointerCapture(ev.pointerId);
-      moveOnRail(ev);
-    });
-    rail.addEventListener('pointermove', ev=>{
-      if(ev.pressure===0) return;
-      moveOnRail(ev);
-    });
-
-    col.appendChild(rail);
-    col.appendChild(thumb);
-    const nameEl = document.createElement('div');
-    nameEl.className='code-name';
-    nameEl.textContent=name;
-    col.appendChild(nameEl);
-    const centEl = document.createElement('div');
-    centEl.className='code-cent';
-    centEl.textContent='0 ct';
-    col.appendChild(centEl);
-    codeColsEl.appendChild(col);
-
-    const cr = document.createElement('div');
-    cr.textContent=`${name}: 0 ct`;
-    codeCentRowEl.appendChild(cr);
-  });
-
-  setTimeout(resizePanels, 0);
-}
-function placeThumb(rail, thumb, cents){
-  const r = rail.getBoundingClientRect();
-  const y = (1 - (cents - CENT_MIN)/(CENT_MAX - CENT_MIN)) * r.height;
-  thumb.style.top = `${y}px`;
-}
-function startCodeVoice(step, cents, thumbEl){
-  const o = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-  o.type = soundSelectEl.value;
-  o.frequency.value = calcFreq(step, cents, octaveOffset);
-
-  g.gain.setValueAtTime(0, audioCtx.currentTime);
-  g.gain.linearRampToValueAtTime(0.25, audioCtx.currentTime + 0.03);
-
-  o.connect(g).connect(masterGain);
-  o.start();
-  chordVoices.set(step, {osc:o, gain:g, cents, step, thumbEl});
-  if (thumbEl) thumbEl.classList.add('on');
-}
-function stopCodeVoice(step, thumbEl){
-  const v = chordVoices.get(step);
-  if(!v) return;
-  v.gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.06);
-  v.osc.stop(audioCtx.currentTime + 0.07);
-  chordVoices.delete(step);
-  if (thumbEl) thumbEl.classList.remove('on');
-}
-function retuneCodeVoice(step, cents){
-  const v = chordVoices.get(step);
-  if(!v) return;
-  v.cents = cents;
-  const f = calcFreq(step, cents, octaveOffset);
-  v.osc.frequency.cancelScheduledValues(audioCtx.currentTime);
-  v.osc.frequency.linearRampToValueAtTime(f, audioCtx.currentTime + 0.02);
-}
-function stopAllCode(){
-  for(const [, v] of chordVoices){
-    v.gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.05);
-    v.osc.stop(audioCtx.currentTime + 0.06);
-    v.thumbEl?.classList.remove('on');
-  }
-  chordVoices.clear();
-  document.querySelectorAll('.note-column').forEach(c=>c.classList.remove('active'));
-}
-function syncCodeThumbTexts(){
-  document.querySelectorAll('#code-columns .code-col').forEach((col, i)=>{
-    const thumb = col.querySelector('.code-thumb');
-    if (!thumb) return;
-    thumb.textContent = `+0 ct`;
-    thumb.classList.toggle('on', chordVoices.has(i));
-  });
-}
-
-/* ========= 単音（グリッド/12TET共通） ========= */
+/* ====== 単音 / コード ====== */
 async function startNote(info){
   try{
     await ensureAudio();
@@ -530,7 +340,35 @@ function stopNote(){
   document.querySelectorAll('.note-column').forEach(c=>c.classList.remove('active'));
 }
 
-/* ========= Util ========= */
+// コード用
+function startChordVoice(step, cents){
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = soundSelectEl.value;
+  o.frequency.value = calcFreq(step, cents, octaveOffset);
+  g.gain.setValueAtTime(0, audioCtx.currentTime);
+  g.gain.linearRampToValueAtTime(0.3, audioCtx.currentTime + 0.03);
+  o.connect(g).connect(masterGain);
+  o.start();
+  chordVoices.set(step, {osc:o, gain:g, cents});
+}
+function stopAllChord(){
+  for(const [, v] of chordVoices){
+    v.gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.05);
+    v.osc.stop(audioCtx.currentTime + 0.06);
+  }
+  chordVoices.clear();
+  document.querySelectorAll('.note-column').forEach(c=>c.classList.remove('active'));
+}
+function retuneAllChordAfterOct(){
+  for(const [step, v] of chordVoices){
+    const f = calcFreq(step, v.cents, octaveOffset);
+    v.osc.frequency.cancelScheduledValues(audioCtx.currentTime);
+    v.osc.frequency.linearRampToValueAtTime(f, audioCtx.currentTime + 0.02);
+  }
+}
+
+/* ====== Util ====== */
 function calcFreq(step, cents, oct){
   const C4 = 261.63;
   const semi = step + oct*12 + cents/100;
@@ -551,7 +389,7 @@ function updateRecUI(){
   recordStatus.textContent = isRecording ? '録音中…' : '待機中';
 }
 
-/* ========= WAVエンコード & 録音一覧 ========= */
+/* ====== WAV + 録音 ====== */
 function encodeWav(chs, sr){
   const N = chs[0].length, C = chs.length;
   const inter = new Float32Array(N*C);
@@ -573,6 +411,7 @@ function encodeWav(chs, sr){
 function pushRecording(wav){
   const url = URL.createObjectURL(wav);
   const list = document.getElementById('recordings-list');
+  if (!list) return;
 
   recordingsSec.hidden = false;
 
@@ -581,64 +420,65 @@ function pushRecording(wav){
   const now = new Date();
   const stamp = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}-${String(now.getMinutes()).padStart(2,'0')}-${String(now.getSeconds()).padStart(2,'0')}`;
   const name = `recording_${(++recCount).toString().padStart(2,'0')}_${stamp}.wav`;
+
   const audio = document.createElement('audio');
   audio.controls=true;
   audio.src=url;
+
   const a = document.createElement('a');
   a.href=url;
   a.download=name;
   a.textContent=`📥 ${name}`;
+
   const open = document.createElement('a');
   open.href=url;
   open.target='_blank';
   open.rel='noopener';
   open.textContent='⤴︎ 新しいタブで開く';
+
   const del = document.createElement('button');
   del.textContent='削除';
   del.addEventListener('click',()=>{
     URL.revokeObjectURL(url);
     item.remove();
   });
+
   const meta = document.createElement('span');
   meta.style.fontSize='12px';
   meta.style.color='#666';
   meta.textContent=` (${Math.round(wav.size/1024)} KB)`;
+
   item.appendChild(audio);
   item.appendChild(a);
   item.appendChild(open);
   item.appendChild(del);
   item.appendChild(meta);
   list.prepend(item);
-
-  resizePanels();
 }
 function clearAll(){
   const list=document.getElementById('recordings-list');
+  if(!list) return;
   list.querySelectorAll("a[href^='blob:']").forEach(a=>URL.revokeObjectURL(a.href));
   list.innerHTML='';
   recordingsSec.hidden = true;
-  resizePanels();
 }
 
-/* ========= イベント ========= */
+/* ====== イベント ====== */
 function attachEvents(){
   mainModeEls.forEach(r=>r.addEventListener('change', updatePanels));
-
-  // 12音/7音切り替え
   scaleModeEls.forEach(r=>r.addEventListener('change', ()=>{
     buildGrid();
-    resizePanels();
   }));
 
   octDownBtn.addEventListener('click', ()=>{
     octaveOffset--;
     updateOct();
-    retuneAllCodeAfterOct();
+    retuneAllChordAfterOct();
   });
   octUpBtn.addEventListener('click', ()=>{
     octaveOffset++;
     updateOct();
-    retuneAllCodeAfterOct();
+    retuneAllChordAfterOct();
   });
 
   recordBtn.addEventListener('click', async ()=>{
@@ -666,7 +506,7 @@ function attachEvents(){
   });
   clearRecsBtn.addEventListener('click', clearAll);
 
-  // ★ グリッドのポインタイベント：モードごとに処理を分岐
+  // グリッド操作
   gridEl.addEventListener('pointerdown', async e=>{
     const mode = getMainMode();
     e.preventDefault();
@@ -678,8 +518,9 @@ function attachEvents(){
       gridPointerNormal(e,'start');
     } else if (mode === 'tet12'){
       gridPointerTet12(e,'start');
-    } else if (mode === 'code'){
-      gridCodeTap(e); // コードはタップごとにON/OFF
+    } else {
+      // コードモード：タップでON/OFF
+      gridChordTap(e);
     }
   }, {passive:false});
 
@@ -691,7 +532,6 @@ function attachEvents(){
     } else if (mode === 'tet12'){
       gridPointerTet12(e,'move');
     }
-    // code モードはドラッグなし
   });
 
   gridEl.addEventListener('pointerup', e=>{
@@ -702,7 +542,7 @@ function attachEvents(){
       gridPointerNormal(e,'end');
     } else if (mode === 'tet12'){
       gridPointerTet12(e,'end');
-    } else if (mode === 'code'){
+    } else {
       hudHide();
     }
   });
@@ -715,26 +555,18 @@ function attachEvents(){
       gridPointerNormal(e,'end');
     } else if (mode === 'tet12'){
       gridPointerTet12(e,'end');
-    } else if (mode === 'code'){
+    } else {
       hudHide();
     }
   });
 
-  // 全画面
   fsBtn.addEventListener('click', toggleFullscreen);
   document.addEventListener('fullscreenchange', updateFSUI);
   document.addEventListener('webkitfullscreenchange', updateFSUI);
   document.addEventListener('msfullscreenchange', updateFSUI);
 }
-function retuneAllCodeAfterOct(){
-  for(const [step, v] of chordVoices){
-    const f = calcFreq(step, v.cents, octaveOffset);
-    v.osc.frequency.cancelScheduledValues(audioCtx.currentTime);
-    v.osc.frequency.linearRampToValueAtTime(f, audioCtx.currentTime + 0.02);
-  }
-}
 
-/* ========= 全画面 ========= */
+/* ====== 全画面 ====== */
 function fullscreenSupported(){
   const el = document.documentElement;
   return !!(el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen);
@@ -743,9 +575,7 @@ async function toggleFullscreen(){
   try{
     await ensureAudio();
     await audioCtx?.resume();
-  }catch(e){
-    /* 無視でOK */
-  }
+  }catch(e){}
   if (document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement) {
     (document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen)?.call(document);
     document.body.classList.remove('fullscreen');

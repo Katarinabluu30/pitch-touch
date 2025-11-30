@@ -58,7 +58,7 @@
   <!-- エラーメッセージ -->
   <div id="err"></div>
 
-  <!-- メインパネル（今回はグリッドのみ使用） -->
+  <!-- メインパネル（グリッド） -->
   <main>
     <section id="grid-panel">
       <div id="grid-wrapper">
@@ -77,13 +77,8 @@
       </div>
     </section>
 
-    <!-- 旧12TET / コード用パネル（JS的に必要なので残すが表示しない） -->
-    <section id="tet12-panel" hidden style="display:none;">
-      <div id="tet12-keys">
-        <!-- ここは使わない（すべてグリッドで操作） -->
-      </div>
-    </section>
-
+    <!-- 旧パネル（DOMエラー防止用に残すだけ） -->
+    <section id="tet12-panel" hidden style="display:none;"></section>
     <section id="code-panel" hidden style="display:none;">
       <div id="code-columns"></div>
       <div id="code-cent-row"></div>
