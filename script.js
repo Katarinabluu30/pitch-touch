@@ -1,34 +1,17 @@
 // Microtonal Touch Grid
 
-const errEl = document.getElementById('err');
-function showErr(msg){
-  if (errEl) errEl.textContent = `⚠ ${msg}`;
-  console.error(msg);
-}
+/* ====== グローバル変数（DOM参照は init 内で代入） ====== */
+let errEl;
+let mainModeEls, scaleModeEls;
+let soundSelectEl, octDownBtn, octUpBtn, octLabelEl;
+let recordBtn, recordStatus, clearRecsBtn, fsBtn;
+let gridEl, noteRowEl, centLabelsEl, recordingsSec, hudEl;
 
 /* ====== 音階定義 ====== */
 const NOTE_NAMES_7  = ["C","D","E","F","G","A","B"];
 const NOTE_STEPS_7  = [0,2,4,5,7,9,11];
 const NOTE_NAMES_12 = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 const NOTE_STEPS_12 = [0,1,2,3,4,5,6,7,8,9,10,11];
-
-/* ====== DOM ====== */
-const mainModeEls   = document.querySelectorAll('input[name="mainMode"]');
-const scaleModeEls  = document.querySelectorAll('input[name="scaleMode"]');
-const soundSelectEl = document.getElementById("sound-select");
-const octDownBtn    = document.getElementById("oct-down");
-const octUpBtn      = document.getElementById("oct-up");
-const octLabelEl    = document.getElementById("oct-label");
-const recordBtn     = document.getElementById("record-btn");
-const recordStatus  = document.getElementById("record-status");
-const clearRecsBtn  = document.getElementById("clear-recs");
-const fsBtn         = document.getElementById("fs-btn");
-
-const gridEl        = document.getElementById("pitch-grid");
-const noteRowEl     = document.getElementById("note-label-row");
-const centLabelsEl  = document.getElementById("cent-labels");
-const recordingsSec = document.getElementById("recordings");
-const hudEl         = document.getElementById("touch-hud");
 
 /* ====== Audio 関係 ====== */
 let audioCtx=null, masterGain=null, comp=null;
@@ -41,6 +24,12 @@ let isPointerDown=false;
 let isRecording=false, recLeft=null, recRight=null, recSR=48000, recCount=0;
 
 const CENT_MIN=-100, CENT_MAX=100;
+
+/* ====== 共通エラー表示 ====== */
+function showErr(msg){
+  if (errEl) errEl.textContent = `⚠ ${msg}`;
+  console.error(msg);
+}
 
 /* ====== Worklet ソース作成 ====== */
 function createRecorderWorkletURL() {
@@ -92,12 +81,30 @@ function createRecorderWorkletURL() {
 }
 
 /* ====== 初期化 ====== */
-init();
 function init(){
+  // --- DOM をここでまとめて取得 ---
+  errEl          = document.getElementById('err');
+  mainModeEls    = document.querySelectorAll('input[name="mainMode"]');
+  scaleModeEls   = document.querySelectorAll('input[name="scaleMode"]');
+  soundSelectEl  = document.getElementById("sound-select");
+  octDownBtn     = document.getElementById("oct-down");
+  octUpBtn       = document.getElementById("oct-up");
+  octLabelEl     = document.getElementById("oct-label");
+  recordBtn      = document.getElementById("record-btn");
+  recordStatus   = document.getElementById("record-status");
+  clearRecsBtn   = document.getElementById("clear-recs");
+  fsBtn          = document.getElementById("fs-btn");
+  gridEl         = document.getElementById("pitch-grid");
+  noteRowEl      = document.getElementById("note-label-row");
+  centLabelsEl   = document.getElementById("cent-labels");
+  recordingsSec  = document.getElementById("recordings");
+  hudEl          = document.getElementById("touch-hud");
+
   if (!gridEl || !noteRowEl){
     showErr("pitch-grid か note-label-row が見つかりません。HTMLのIDを確認してください。");
     return;
   }
+
   buildGrid();
   attachEvents();
   updatePanels();
@@ -106,10 +113,14 @@ function init(){
 
   // モバイル：最初のタッチで AudioContext 解錠
   window.addEventListener('touchstart', async function unlockOnce(){
-    try{ await ensureAudio(); await audioCtx.resume(); }catch(e){ showErr(`Audio unlock失敗: ${e?.message||e}`); }
+    try{ await ensureAudio(); await audioCtx.resume(); }
+    catch(e){ showErr(`Audio unlock失敗: ${e?.message||e}`); }
     window.removeEventListener('touchstart', unlockOnce, {passive:true});
   }, {passive:true});
 }
+
+// DOM 構築完了後に init 実行
+window.addEventListener('DOMContentLoaded', init);
 
 /* ====== モード / スケール ====== */
 function getMainMode(){
@@ -126,7 +137,7 @@ function getScaleDefs(){
 function updatePanels(){
   const mode = getMainMode();
   // 12平均律モードではセン値ラベルを隠す
-  centLabelsEl.hidden = (mode === 'tet12');
+  if (centLabelsEl) centLabelsEl.hidden = (mode === 'tet12');
   stopNote();
   stopAllChord();
   hudHide();
@@ -380,6 +391,7 @@ function hudShow(text,x,y){
   hudEl.style.transform=`translate(${x+12}px,${y-24}px)`;
 }
 function hudHide(){
+  if (!hudEl) return;
   hudEl.hidden=true;
   hudEl.style.transform='translate(-9999px,-9999px)';
 }
