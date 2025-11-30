@@ -34,17 +34,11 @@ const hudEl         = document.getElementById("touch-hud");
 let audioCtx=null, masterGain=null, comp=null;
 let useWorklet=false, recorderNode=null, scriptNode=null;
 
-/** 単音用（12平均律モードなど） */
-let osc=null, gainNode=null, currentNoteInfo=null;
+// ★ 通常モード / 12TET 用： pointerId → {osc,gain,step,cents,colIndex}
+const activePointers = new Map();
 
-/** コードモード（ON/OFF）用 */
-let chordVoices = new Map(); // step -> {osc,gain,cents}
-
-/** 通常モードのマルチタッチ用
- *  pointerId -> { osc, gain, info:{name,step,cents}, colIndex }
- */
-let activeTouches = new Map();
-let colTouchCounts = []; // colIndex -> その列を押している指の数
+// ★ コードモード用： step → {osc,gain,cents}
+let chordVoices = new Map();
 
 let octaveOffset = 0;
 
@@ -135,10 +129,10 @@ function getScaleDefs(){
 }
 function updatePanels(){
   const mode = getMainMode();
-  centLabelsEl.hidden = (mode === 'tet12'); // 12TETのときだけセン値目盛り隠す
-  stopNote();
-  stopAllChord();
-  stopAllGridTouches();
+  // 12平均律モードではセン値ラベルを隠す
+  centLabelsEl.hidden = (mode === 'tet12');
+  stopNote();      // すべての指の音を止める
+  stopAllChord();  // コードも止める
   hudHide();
 }
 
@@ -147,11 +141,6 @@ function buildGrid(){
   const {names} = getScaleDefs();
   gridEl.innerHTML = '';
   noteRowEl.innerHTML = '';
-
-  stopAllGridTouches();
-
-  colTouchCounts = new Array(names.length).fill(0);
-
   names.forEach(name=>{
     const col = document.createElement('div');
     col.className = 'note-column';
@@ -161,6 +150,7 @@ function buildGrid(){
     label.textContent = name;
     noteRowEl.appendChild(label);
   });
+  refreshColumnActive();
 }
 
 /* ====== Audio Graph 構築 ====== */
@@ -229,82 +219,65 @@ function appendF32(dst, src){
   return out;
 }
 
-/* ====== グリッド操作：通常モード（マルチタッチ対応） ====== */
+/* ====== グリッド操作（通常 / 12TET） ====== */
+// 通常：押している間だけ発音 & 上下で ±100 ct
 function gridPointerNormal(e, phase){
+  const pointerId = e.pointerId;
   const rect = gridEl.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
-  const pointerId = e.pointerId;
 
-  const {names, steps} = getScaleDefs();
-  const colW = rect.width / names.length;
-  const cols = document.querySelectorAll('.note-column');
-
-  // グリッド外
   if(x<0||x>rect.width||y<0||y>rect.height){
-    if(phase === 'move' || phase === 'end'){
-      stopGridVoice(pointerId);
-    }
-    if(phase === 'end') hudHide();
+    if(phase !== 'end') stopNote(pointerId);
+    hudHide();
     return;
   }
 
+  const {names, steps} = getScaleDefs();
+  const colW = rect.width / names.length;
   const idx = Math.max(0, Math.min(names.length-1, Math.floor(x/colW)));
   const name = names[idx];
   const step = steps[idx];
 
   const ratioY = y/rect.height;
   const cents = Math.round(CENT_MAX - (CENT_MAX - CENT_MIN)*ratioY);
-  const info = {name, step, cents};
 
   hudShow(`${name}  ${cents>=0?'+':''}${cents} ct`, x, y);
 
-  if(phase === 'start'){
-    startGridVoice(pointerId, info, idx);
-  } else if(phase === 'move'){
-    if(activeTouches.has(pointerId)){
-      updateGridVoice(pointerId, info, idx);
-    } else {
-      // まれに start が取れなかった時の保険
-      startGridVoice(pointerId, info, idx);
-    }
-  } else if(phase === 'end'){
-    stopGridVoice(pointerId);
-    hudHide();
-  }
+  const info = {name, step, cents, colIndex: idx};
+  if(phase==='start')      startNote(info, pointerId);
+  else if(phase==='move')  updateNote(info, pointerId);
+  else if(phase==='end'){  stopNote(pointerId); hudHide(); }
 }
 
-/* ====== グリッド操作：12平均律モード（単音） ====== */
+// 12平均律：0 ct 固定
 function gridPointerTet12(e, phase){
+  const pointerId = e.pointerId;
   const rect = gridEl.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
 
-  const {names, steps} = getScaleDefs();
-  const colW = rect.width / names.length;
-  const cols = document.querySelectorAll('.note-column');
-
   if(x<0||x>rect.width||y<0||y>rect.height){
-    if(phase !== 'end') stopNote();
+    if(phase !== 'end') stopNote(pointerId);
     hudHide();
-    cols.forEach(c=>c.classList.remove('active'));
     return;
   }
 
+  const {names, steps} = getScaleDefs();
+  const colW = rect.width / names.length;
   const idx = Math.max(0, Math.min(names.length-1, Math.floor(x/colW)));
   const name = names[idx];
   const step = steps[idx];
 
-  cols.forEach((c,i)=>c.classList.toggle('active', i===idx && phase!=='end'));
   hudShow(`${name}`, x, y);
 
-  const info = {name, step, cents:0};
-  if(phase==='start')      startNote(info);
-  else if(phase==='move')  updateNote(info);
-  else if(phase==='end'){  stopNote(); hudHide(); }
+  const info = {name, step, cents:0, colIndex: idx};
+  if(phase==='start')      startNote(info, pointerId);
+  else if(phase==='move')  updateNote(info, pointerId);
+  else if(phase==='end'){  stopNote(pointerId); hudHide(); }
 }
 
-/* ====== グリッド操作：コードモード（タップON/OFF） ====== */
+// コードモード：タップで ON/OFF（縦位置がその列の cent）
 function gridChordTap(e){
   const rect = gridEl.getBoundingClientRect();
   const x = e.clientX - rect.left;
@@ -329,16 +302,16 @@ function gridChordTap(e){
     v.gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.06);
     v.osc.stop(audioCtx.currentTime + 0.07);
     chordVoices.delete(step);
-    cols[idx].classList.remove('active');
   } else {
     startChordVoice(step, cents);
-    cols[idx].classList.add('active');
   }
+
   hudShow(`${name}  ${cents>=0?'+':''}${cents} ct`, x, y);
+  refreshColumnActive();
 }
 
-/* ====== 単音（12TETなど） ====== */
-async function startNote(info){
+/* ====== 単音 / コード ====== */
+async function startNote(info, pointerId){
   try{
     await ensureAudio();
     await audioCtx.resume();
@@ -346,148 +319,63 @@ async function startNote(info){
     showErr(`Audio開始失敗: ${e?.message||e}`);
     return;
   }
-  stopNote();
+  // すでにその pointerId の音があれば止める
+  if (activePointers.has(pointerId)){
+    stopNote(pointerId);
+  }
 
-  const t = audioCtx.currentTime;
-
-  osc = audioCtx.createOscillator();
-  gainNode = audioCtx.createGain();
-
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
   osc.type = soundSelectEl.value;
   osc.frequency.value = calcFreq(info.step, info.cents, octaveOffset);
+  gain.gain.setValueAtTime(0, audioCtx.currentTime);
+  gain.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.02);
+  osc.connect(gain).connect(masterGain);
+  osc.start();
 
-  gainNode.gain.cancelScheduledValues(t);
-  gainNode.gain.setValueAtTime(0, t);
-  gainNode.gain.linearRampToValueAtTime(0.55, t + 0.005);
+  activePointers.set(pointerId, {
+    osc,
+    gain,
+    step: info.step,
+    cents: info.cents,
+    colIndex: info.colIndex
+  });
 
-  osc.connect(gainNode).connect(masterGain);
-  osc.start(t);
-
-  currentNoteInfo = info;
+  refreshColumnActive();
 }
-function updateNote(info){
-  if(!osc) return;
-  const t = audioCtx.currentTime;
+
+function updateNote(info, pointerId){
+  const v = activePointers.get(pointerId);
+  if(!v) return;
   const f = calcFreq(info.step, info.cents, octaveOffset);
-  osc.frequency.cancelScheduledValues(t);
-  osc.frequency.linearRampToValueAtTime(f, t + 0.02);
-  currentNoteInfo = info;
-}
-function stopNote(){
-  if(!osc) return;
-
-  const t = audioCtx.currentTime;
-  gainNode.gain.cancelScheduledValues(t);
-  const current = gainNode.gain.value;
-  gainNode.gain.setValueAtTime(current, t);
-  gainNode.gain.linearRampToValueAtTime(0, t + 0.15);
-  osc.stop(t + 0.16);
-
-  osc=null;
-  gainNode=null;
-  currentNoteInfo=null;
-
-  document.querySelectorAll('.note-column').forEach(c=>c.classList.remove('active'));
+  v.osc.frequency.cancelScheduledValues(audioCtx.currentTime);
+  v.osc.frequency.linearRampToValueAtTime(f, audioCtx.currentTime + 0.02);
+  v.step = info.step;
+  v.cents = info.cents;
+  v.colIndex = info.colIndex;
+  refreshColumnActive();
 }
 
-/* ====== 通常モード用：マルチタッチのボイス管理 ====== */
-function startGridVoice(pointerId, info, colIndex){
-  if(!audioCtx){
+// pointerId 指定で1音だけ止める。引数なしなら全停止。
+function stopNote(pointerId){
+  if (pointerId == null){
+    for (const [id, v] of activePointers){
+      v.gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.06);
+      v.osc.stop(audioCtx.currentTime + 0.07);
+    }
+    activePointers.clear();
+    refreshColumnActive();
     return;
   }
-  const t = audioCtx.currentTime;
-  const o = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-
-  o.type = soundSelectEl.value;
-  o.frequency.value = calcFreq(info.step, info.cents, octaveOffset);
-
-  g.gain.cancelScheduledValues(t);
-  g.gain.setValueAtTime(0, t);
-  g.gain.linearRampToValueAtTime(0.55, t + 0.005);
-
-  o.connect(g).connect(masterGain);
-  o.start(t);
-
-  activeTouches.set(pointerId, {osc:o, gain:g, info, colIndex});
-
-  colTouchCounts[colIndex] = (colTouchCounts[colIndex]||0) + 1;
-  const cols = document.querySelectorAll('.note-column');
-  if(cols[colIndex]) cols[colIndex].classList.add('active');
-}
-
-function updateGridVoice(pointerId, info, newColIndex){
-  const v = activeTouches.get(pointerId);
+  const v = activePointers.get(pointerId);
   if(!v) return;
-
-  const t = audioCtx.currentTime;
-  const f = calcFreq(info.step, info.cents, octaveOffset);
-  v.osc.frequency.cancelScheduledValues(t);
-  v.osc.frequency.linearRampToValueAtTime(f, t + 0.02);
-
-  // 別の列に移動した場合はハイライトも移す
-  if(typeof v.colIndex === 'number' && v.colIndex !== newColIndex){
-    const cols = document.querySelectorAll('.note-column');
-
-    colTouchCounts[v.colIndex] = Math.max(0, (colTouchCounts[v.colIndex]||0) - 1);
-    if(colTouchCounts[v.colIndex] === 0 && cols[v.colIndex]){
-      cols[v.colIndex].classList.remove('active');
-    }
-
-    colTouchCounts[newColIndex] = (colTouchCounts[newColIndex]||0) + 1;
-    if(cols[newColIndex]) cols[newColIndex].classList.add('active');
-
-    v.colIndex = newColIndex;
-  }
-
-  v.info = info;
+  v.gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.06);
+  v.osc.stop(audioCtx.currentTime + 0.07);
+  activePointers.delete(pointerId);
+  refreshColumnActive();
 }
 
-function stopGridVoice(pointerId){
-  const v = activeTouches.get(pointerId);
-  if(!v) return;
-
-  const t = audioCtx.currentTime;
-  v.gain.gain.cancelScheduledValues(t);
-  const current = v.gain.gain.value;
-  v.gain.gain.setValueAtTime(current, t);
-  v.gain.gain.linearRampToValueAtTime(0, t + 0.15);
-  v.osc.stop(t + 0.16);
-
-  const cols = document.querySelectorAll('.note-column');
-  if(typeof v.colIndex === 'number'){
-    colTouchCounts[v.colIndex] = Math.max(0, (colTouchCounts[v.colIndex]||0) - 1);
-    if(colTouchCounts[v.colIndex] === 0 && cols[v.colIndex]){
-      cols[v.colIndex].classList.remove('active');
-    }
-  }
-
-  activeTouches.delete(pointerId);
-}
-
-function stopAllGridTouches(){
-  const t = audioCtx ? audioCtx.currentTime : 0;
-  for(const [, v] of activeTouches){
-    if(!audioCtx) continue;
-    v.gain.gain.cancelScheduledValues(t);
-    const current = v.gain.gain.value;
-    v.gain.gain.setValueAtTime(current, t);
-    v.gain.gain.linearRampToValueAtTime(0, t + 0.15);
-    v.osc.stop(t + 0.16);
-  }
-  activeTouches.clear();
-  colTouchCounts = [];
-  document.querySelectorAll('.note-column').forEach(c=>c.classList.remove('active'));
-}
-
-/* ★ 非常停止：全部まとめてミュート ★ */
-function stopEverythingHard(){
-  stopNote();
-  stopAllGridTouches();
-  stopAllChord();
-}
-
-/* ====== コード用 ====== */
+// コード用
 function startChordVoice(step, cents){
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
@@ -499,14 +387,16 @@ function startChordVoice(step, cents){
   o.start();
   chordVoices.set(step, {osc:o, gain:g, cents});
 }
+
 function stopAllChord(){
   for(const [, v] of chordVoices){
     v.gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.05);
     v.osc.stop(audioCtx.currentTime + 0.06);
   }
   chordVoices.clear();
-  document.querySelectorAll('.note-column').forEach(c=>c.classList.remove('active'));
+  refreshColumnActive();
 }
+
 function retuneAllChordAfterOct(){
   for(const [step, v] of chordVoices){
     const f = calcFreq(step, v.cents, octaveOffset);
@@ -521,6 +411,7 @@ function calcFreq(step, cents, oct){
   const semi = step + oct*12 + cents/100;
   return C4 * Math.pow(2, semi/12);
 }
+
 function hudShow(text,x,y){
   hudEl.textContent=text;
   hudEl.hidden=false;
@@ -530,10 +421,34 @@ function hudHide(){
   hudEl.hidden=true;
   hudEl.style.transform='translate(-9999px,-9999px)';
 }
+
 function updateOct(){ octLabelEl.textContent = String(octaveOffset); }
+
 function updateRecUI(){
   recordBtn.classList.toggle('recording', isRecording);
   recordStatus.textContent = isRecording ? '録音中…' : '待機中';
+}
+
+// アクティブ列のハイライト（通常モード＋コードモード両方込み）
+function refreshColumnActive(){
+  const cols = document.querySelectorAll('.note-column');
+  const active = new Set();
+
+  // pointer の列
+  for (const [, v] of activePointers){
+    if (typeof v.colIndex === 'number') active.add(v.colIndex);
+  }
+
+  // コードモードの列
+  const {steps} = getScaleDefs();
+  for (const [step] of chordVoices){
+    const idx = steps.indexOf(step);
+    if (idx >= 0) active.add(idx);
+  }
+
+  cols.forEach((c,i)=>{
+    c.classList.toggle('active', active.has(i));
+  });
 }
 
 /* ====== WAV + 録音 ====== */
@@ -614,9 +529,6 @@ function clearAll(){
 function attachEvents(){
   mainModeEls.forEach(r=>r.addEventListener('change', updatePanels));
   scaleModeEls.forEach(r=>r.addEventListener('change', ()=>{
-    stopNote();
-    stopAllChord();
-    stopAllGridTouches();
     buildGrid();
   }));
 
@@ -624,23 +536,11 @@ function attachEvents(){
     octaveOffset--;
     updateOct();
     retuneAllChordAfterOct();
-    for(const [, v] of activeTouches){
-      const info = v.info;
-      const f = calcFreq(info.step, info.cents, octaveOffset);
-      v.osc.frequency.cancelScheduledValues(audioCtx.currentTime);
-      v.osc.frequency.linearRampToValueAtTime(f, audioCtx.currentTime + 0.02);
-    }
   });
   octUpBtn.addEventListener('click', ()=>{
     octaveOffset++;
     updateOct();
     retuneAllChordAfterOct();
-    for(const [, v] of activeTouches){
-      const info = v.info;
-      const f = calcFreq(info.step, info.cents, octaveOffset);
-      v.osc.frequency.cancelScheduledValues(audioCtx.currentTime);
-      v.osc.frequency.linearRampToValueAtTime(f, audioCtx.currentTime + 0.02);
-    }
   });
 
   recordBtn.addEventListener('click', async ()=>{
@@ -668,18 +568,22 @@ function attachEvents(){
   });
   clearRecsBtn.addEventListener('click', clearAll);
 
-  // グリッド操作（pointerIdごとに処理）
+  // グリッド操作（マルチタッチ対応）
   gridEl.addEventListener('pointerdown', async e=>{
     const mode = getMainMode();
     e.preventDefault();
     gridEl.setPointerCapture(e.pointerId);
-    await ensureAudio();
-    await audioCtx.resume();
+    try{
+      await ensureAudio();
+      await audioCtx.resume();
+    }catch(e2){ showErr(`Audio開始失敗: ${e2?.message||e2}`); }
+
     if (mode === 'grid'){
       gridPointerNormal(e,'start');
     } else if (mode === 'tet12'){
       gridPointerTet12(e,'start');
     } else {
+      // コードモード：タップでON/OFF（pointerdown一発）
       gridChordTap(e);
     }
   }, {passive:false});
@@ -712,36 +616,6 @@ function attachEvents(){
       gridPointerTet12(e,'end');
     } else {
       hudHide();
-    }
-  });
-
-  // ★ グローバルでも pointerup / cancel を拾う保険
-  window.addEventListener('pointerup', e=>{
-    const mode = getMainMode();
-    if (mode === 'grid'){
-      gridPointerNormal(e,'end');
-    } else if (mode === 'tet12'){
-      gridPointerTet12(e,'end');
-    } else {
-      hudHide();
-    }
-  });
-
-  window.addEventListener('pointercancel', e=>{
-    const mode = getMainMode();
-    if (mode === 'grid'){
-      gridPointerNormal(e,'end');
-    } else if (mode === 'tet12'){
-      gridPointerTet12(e,'end');
-    } else {
-      hudHide();
-    }
-  });
-
-  // ★ タブが非アクティブになったら全部止める
-  document.addEventListener('visibilitychange', ()=>{
-    if (document.hidden){
-      stopEverythingHard();
     }
   });
 
