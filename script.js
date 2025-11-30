@@ -34,10 +34,10 @@ const hudEl         = document.getElementById("touch-hud");
 let audioCtx=null, masterGain=null, comp=null;
 let useWorklet=false, recorderNode=null, scriptNode=null;
 
-// ★ 通常モード / 12TET 用： pointerId → {osc,gain,step,cents,colIndex}
+// 通常モード / 12TET 用： pointerId → {osc,gain,step,cents,colIndex}
 const activePointers = new Map();
 
-// ★ コードモード用： step → {osc,gain,cents}
+// コードモード用： step → {osc,gain,cents}
 let chordVoices = new Map();
 
 let octaveOffset = 0;
@@ -295,8 +295,6 @@ function gridChordTap(e){
   const ratioY = y/rect.height;
   const cents = Math.round(CENT_MAX - (CENT_MAX - CENT_MIN)*ratioY);
 
-  const cols = document.querySelectorAll('.note-column');
-
   if (chordVoices.has(step)){
     const v = chordVoices.get(step);
     v.gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.06);
@@ -359,7 +357,7 @@ function updateNote(info, pointerId){
 // pointerId 指定で1音だけ止める。引数なしなら全停止。
 function stopNote(pointerId){
   if (pointerId == null){
-    for (const [id, v] of activePointers){
+    for (const [, v] of activePointers){
       v.gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.06);
       v.osc.stop(audioCtx.currentTime + 0.07);
     }
@@ -618,6 +616,15 @@ function attachEvents(){
       hudHide();
     }
   });
+
+  // ★ ロングタップなどで pointer capture が外れたときも必ず音を止める
+  gridEl.addEventListener('lostpointercapture', e=>{
+    stopNote(e.pointerId);
+    hudHide();
+  });
+
+  // ★ 長押しでコンテキストメニューが出ると pointerup が来ないので禁止
+  gridEl.addEventListener('contextmenu', e=>e.preventDefault());
 
   fsBtn.addEventListener('click', toggleFullscreen);
   document.addEventListener('fullscreenchange', updateFSUI);
