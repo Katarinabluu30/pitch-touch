@@ -58,7 +58,7 @@
   <!-- エラーメッセージ -->
   <div id="err"></div>
 
-  <!-- メインパネル（グリッド） -->
+  <!-- メインパネル（グリッド共通） -->
   <main>
     <section id="grid-panel">
       <div id="grid-wrapper">
@@ -77,8 +77,11 @@
       </div>
     </section>
 
-    <!-- 旧パネル（DOMエラー防止用に残すだけ） -->
-    <section id="tet12-panel" hidden style="display:none;"></section>
+    <!-- 旧12TET / コード用パネル（DOM的に残すだけ） -->
+    <section id="tet12-panel" hidden style="display:none;">
+      <div id="tet12-keys"></div>
+    </section>
+
     <section id="code-panel" hidden style="display:none;">
       <div id="code-columns"></div>
       <div id="code-cent-row"></div>
@@ -91,14 +94,12 @@
     </section>
   </main>
 
-  <!-- フッター -->
-  <div id="build-info">
-    <span>Microtonal Touch Grid Web版</span>
-  </div>
+
 
   <!-- タッチ位置HUD -->
   <div id="touch-hud" hidden></div>
 
+  <!-- 注意：AudioWorklet を使うので https:// or http://localhost で開くこと -->
   <script src="script.js"></script>
 </body>
 </html>
