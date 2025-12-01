@@ -12,6 +12,23 @@ const NOTE_STEPS_7  = [0,2,4,5,7,9,11];
 const NOTE_NAMES_12 = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 const NOTE_STEPS_12 = [0,1,2,3,4,5,6,7,8,9,10,11];
 
+/* ====== 曲ガイド（「かわいいだけじゃだめですか」） ====== */ // ★ 追加
+// note: どの列か（C〜B）
+// cents: 送ってもらった値（目安）
+const KAWAII_GUIDE_POINTS = [ // ★ 追加
+  { step: 1,  kana: "か",   note: "F",  cents:   0 },
+  { step: 2,  kana: "わ",   note: "F#", cents:  11 },
+  { step: 3,  kana: "いー", note: "A",  cents:  79 },
+  { step: 4,  kana: "だ",   note: "F",  cents: -29 },
+  { step: 5,  kana: "け",   note: "E",  cents:  26 },
+  { step: 6,  kana: "じゃ", note: "C",  cents:  58 },
+  { step: 7,  kana: "だ",   note: "D",  cents: -18 },
+  { step: 8,  kana: "め",   note: "F",  cents: -19 },
+  { step: 9,  kana: "です", note: "E",  cents:   0 },
+  { step:10,  kana: "か",   note: "D",  cents: -97 },
+  { step:11,  kana: "あ",   note: "F",  cents:  44 },
+];
+
 /* ====== DOM ====== */
 const mainModeEls   = document.querySelectorAll('input[name="mainMode"]');
 const scaleModeEls  = document.querySelectorAll('input[name="scaleMode"]');
@@ -30,6 +47,9 @@ const centLabelsEl  = document.getElementById("cent-labels");
 const recordingsSec = document.getElementById("recordings");
 const hudEl         = document.getElementById("touch-hud");
 
+/* ★ 追加：曲ガイド用モード選択（ガイドなし / かわいい） */
+const songModeEls   = document.querySelectorAll('input[name="songMode"]'); // HTML側に name="songMode" のラジオ/ボタンがある前提
+
 /* ====== Audio 関係 ====== */
 let audioCtx=null, masterGain=null, comp=null;
 let useWorklet=false, recorderNode=null, scriptNode=null;
@@ -45,6 +65,17 @@ let octaveOffset = 0;
 let isRecording=false, recLeft=null, recRight=null, recSR=48000, recCount=0;
 
 const CENT_MIN=-100, CENT_MAX=100;
+let kawaiiCurrentIndex = 0;
+let kawaiiCellEl = null;
+/* ====== cents -> 行インデックス変換 ====== */ // ★ 追加
+// 5バンド（0〜4）にざっくり割り当て
+function centToRow(c){ // ★ 追加
+  if (c >= 60) return 0;      // +100付近（かなり高め）
+  if (c >= 20) return 1;      // +50付近（ちょい高め）
+  if (c >  -20) return 2;     // 0付近（真ん中）
+  if (c >  -60) return 3;     // -50付近（ちょい低め）
+  return 4;                   // -100付近（かなり低め）
+}
 
 /* ====== Worklet ソース作成 ====== */
 function createRecorderWorkletURL() {
@@ -127,6 +158,14 @@ function getScaleDefs(){
     ? { names: NOTE_NAMES_7,  steps: NOTE_STEPS_7  }
     : { names: NOTE_NAMES_12, steps: NOTE_STEPS_12 };
 }
+
+/* ★ 曲ガイドモード取得（ガイドなし / kawaii / 将来: konayuki 等） */
+function getSongMode(){ // ★ 追加
+  if (!songModeEls || songModeEls.length === 0) return 'off';
+  const r = Array.from(songModeEls).find(x=>x.checked);
+  return r ? r.value : 'off';
+}
+
 function updatePanels(){
   const mode = getMainMode();
   // 12平均律モードではセン値ラベルを隠す
@@ -150,7 +189,92 @@ function buildGrid(){
     label.textContent = name;
     noteRowEl.appendChild(label);
   });
+
+  // ★ songMode を見て、必要ならガイドセルを作る／消す
+  if (getSongMode() === 'kawaii'){
+    buildKawaiiGuide();
+  } else {
+    const old = gridEl.querySelector('#kawaii-cell');
+    if (old) old.remove();
+  }
+
   refreshColumnActive();
+}
+
+/* ====== 曲ガイド表示（かわいいだけじゃだめですか） ====== */ // ★ 追加
+
+function buildKawaiiGuide(){ // ★ 追加
+  // モードが kawaii 以外なら何もしない
+  if (getSongMode() !== 'kawaii') return;
+
+  // 既存セルがあれば消す
+  const old = gridEl.querySelector('#kawaii-cell');
+  if (old) old.remove();
+  kawaiiCellEl = null;
+
+  const {names} = getScaleDefs();
+
+  // 12音階以外（7音モードなど）のときはガイド非表示
+  if (!names || names.length !== 12) return;
+
+  // ガイド用セルを1個だけ作って、上に重ねる
+  const cell = document.createElement('div');
+  cell.id = 'kawaii-cell';
+  cell.innerHTML = `
+    <div class="kc-index"></div>
+    <div class="kc-kana"></div>
+  `;
+  gridEl.appendChild(cell);
+  kawaiiCellEl = cell;
+
+  // 最初は1音目（step=1）のマスを光らせる
+  highlightKawaiiStep(0);
+}
+
+function highlightKawaiiStep(index){ // ★ 追加
+  kawaiiCurrentIndex = index;
+  if (!kawaiiCellEl) return;
+  if (getSongMode() !== 'kawaii') {
+    kawaiiCellEl.style.display = 'none';
+    return;
+  }
+
+  const {names} = getScaleDefs();
+  const p = KAWAII_GUIDE_POINTS[index];
+  const colIndex = names.indexOf(p.note);
+
+  // その音名が今のスケールに無いときは非表示
+  if (colIndex < 0){
+    kawaiiCellEl.style.display = 'none';
+    return;
+  }
+  kawaiiCellEl.style.display = 'flex';
+
+  // 横方向：12列のうち何列目か → ％指定
+  const nCols = names.length;
+  const colWidth = 100 / nCols;
+  const left = colIndex * colWidth;
+  kawaiiCellEl.style.left = `${left}%`;
+  kawaiiCellEl.style.width = `${colWidth}%`;
+
+  // 縦方向：cent → 5バンド（row） → ％指定
+  const row = centToRow(p.cents);     // 0〜4
+  const rowHeight = 100 / 5;
+  const top = row * rowHeight;
+  kawaiiCellEl.style.top = `${top}%`;
+  kawaiiCellEl.style.height = `${rowHeight}%`;
+
+  // 中の表示（番号＋かな）
+  const idxEl  = kawaiiCellEl.querySelector('.kc-index');
+  const kanaEl = kawaiiCellEl.querySelector('.kc-kana');
+  if (idxEl)  idxEl.textContent  = p.step;
+  if (kanaEl) kanaEl.textContent = p.kana;
+}
+
+// 将来、「正しい列を押したら次へ」などで使う用
+function nextKawaiiStep(){ // ★ 追加（今はどこからも呼んでないので副作用なし）
+  const next = (kawaiiCurrentIndex + 1) % KAWAII_GUIDE_POINTS.length;
+  highlightKawaiiStep(next);
 }
 
 /* ====== Audio Graph 構築 ====== */
@@ -530,6 +654,11 @@ function attachEvents(){
     buildGrid();
   }));
 
+  /* ★ 曲ガイドモードが変わったら、グリッド＋ガイドを作り直す */
+  songModeEls.forEach(r=>r.addEventListener('change', ()=>{ // ★ 追加
+    buildGrid();
+  }));
+
   octDownBtn.addEventListener('click', ()=>{
     octaveOffset--;
     updateOct();
@@ -567,8 +696,9 @@ function attachEvents(){
   clearRecsBtn.addEventListener('click', clearAll);
 
   // グリッド操作（マルチタッチ対応）
-  gridEl.addEventListener('pointerdown', async e=>{
+    gridEl.addEventListener('pointerdown', async e=>{
     const mode = getMainMode();
+    const songMode = getSongMode();               // ★ 追加
     e.preventDefault();
     gridEl.setPointerCapture(e.pointerId);
     try{
@@ -578,8 +708,15 @@ function attachEvents(){
 
     if (mode === 'grid'){
       gridPointerNormal(e,'start');
+      // ★ かわいいモードのときは、タッチするたびに次のマスへ
+      if (songMode === 'kawaii'){
+        nextKawaiiStep();
+      }
     } else if (mode === 'tet12'){
       gridPointerTet12(e,'start');
+      if (songMode === 'kawaii'){
+        nextKawaiiStep();
+      }
     } else {
       // コードモード：タップでON/OFF（pointerdown一発）
       gridChordTap(e);

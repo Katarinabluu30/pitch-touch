@@ -128,8 +128,10 @@ main {
   overflow: hidden;
   border: 1px solid #bbb;
   background: #ffffff;
-  touch-action: none;      /* スクロールを抑えてタッチ優先 */
+  touch-action: none;
+  position: relative;           /* ★ 追加：ガイドセルの基準にする */
 }
+
 
 /* 各列（音名ごと） */
 .note-column {
@@ -166,6 +168,28 @@ main {
     #98c1ff
   );
   box-shadow: inset 0 0 6px rgba(0,0,0,0.25);
+}
+/* ★ かわいいモードで光るマス */
+#kawaii-cell {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid #ffb300;
+  background: rgba(255, 243, 200, 0.7);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;   /* タッチ操作の邪魔をしない */
+  font-size: 10px;
+}
+
+#kawaii-cell .kc-index {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+#kawaii-cell .kc-kana {
+  font-size: 11px;
 }
 
 /* 下の音名ラベル */
